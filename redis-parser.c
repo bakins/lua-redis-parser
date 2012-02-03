@@ -48,8 +48,6 @@ static const char * parse_bulk_reply(const char *src, const char *last,
         size_t *dst_len);
 static int parse_multi_bulk_reply(lua_State *L, char **src,
         const char *last);
-static size_t get_num_size(size_t i);
-static char *sprintf_num(char *dst, int64_t ui64);
 static int redis_typename(lua_State *L);
 
 
@@ -517,7 +515,7 @@ redis_build_query(lua_State *L)
     luaL_putchar(&buf, '*');
     lua_pushnumber(L, n);
     luaL_addvalue(&buf);
-    luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+    luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
 
     for (i = 1; i <= n; i++) {
         lua_rawgeti(L, 1, i);
@@ -529,24 +527,26 @@ redis_build_query(lua_State *L)
 		luaL_putchar(&buf, '$');
 		lua_pushnumber(L, len);
 		luaL_addvalue(&buf);
-		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+		luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
 		/*string is already at top of stack*/
 		luaL_addvalue(&buf);
-		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+		luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
 		
                 break;
 
             case LUA_TBOOLEAN:
-		luaL_addlstring(&buf, "$1\r\n", sizeof("$1\r\n") - 1);
+		luaL_addchar(&buf, '$');  luaL_addchar(&buf, '1');
+		luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
 		lua_pushnumber(L, lua_toboolean(L, -1));
 		luaL_addvalue(&buf);
-		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+		luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
 
                 break;
 
             case LUA_TLIGHTUSERDATA:
                 /* must be null */
-		luaL_addlstring(&buf, "$-1\r\n", sizeof("$-1\r\n") - 1);
+		luaL_addchar(&buf, '$');   luaL_addchar(&buf, '-'); luaL_addchar(&buf, '1');
+		luaL_addchar(&buf, '\r');  luaL_addchar(&buf, '\n'); 
                 break;
 
             default:
