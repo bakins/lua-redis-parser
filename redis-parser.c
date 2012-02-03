@@ -492,16 +492,12 @@ invalid:
     return PARSE_ERROR;
 }
 
-
 static int
 redis_build_query(lua_State *L)
 {
     int          i, n;
-    size_t       len, total;
-    const char  *p;
-    char        *last;
-    char        *buf;
-    int          flag;
+    size_t       len;
+    luaL_Buffer  buf;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "expected one argument but got %d",
@@ -516,58 +512,12 @@ redis_build_query(lua_State *L)
         return luaL_error(L, "empty input param table");
     }
 
-    total = sizeof("*") - 1
-          + get_num_size(n)
-          + sizeof("\r\n") - 1
-          ;
-
-    for (i = 1; i <= n; i++) {
-        lua_rawgeti(L, 1, i);
-
-        dd("param type: %d (%d)", lua_type(L, -1), LUA_TUSERDATA);
-
-        switch (lua_type(L, -1)) {
-            case LUA_TSTRING:
-            case LUA_TNUMBER:
-                lua_tolstring(L, -1, &len);
-
-                total += sizeof("$") - 1
-                       + get_num_size(len)
-                       + sizeof("\r\n") - 1
-                       + len
-                       + sizeof("\r\n") - 1
-                       ;
-
-                break;
-
-            case LUA_TBOOLEAN:
-                total += sizeof("$1\r\n1\r\n") - 1;
-                break;
-
-            case LUA_TLIGHTUSERDATA:
-                p = lua_touserdata(L, -1);
-                dd("user data: %p", p);
-                if (p == redis_null) {
-                    total += sizeof("$-1\r\n") - 1;
-                    break;
-                }
-
-            default:
-                return luaL_error(L, "parameter %d is not a string, number, "
-                        "redis.parser.null, or boolean value", i);
-        }
-    }
-
-    buf = malloc(total);
-    if (buf == NULL) {
-        return luaL_error(L, "out of memory");
-    }
-
-    last = buf;
-
-    *last++ = '*';
-    last = sprintf_num(last, n);
-    *last++ = '\r'; *last++ = '\n';
+    luaL_buffinit(L, &buf);
+    
+    luaL_putchar(&buf, '*');
+    lua_pushnumber(L, n);
+    luaL_addvalue(&buf);
+    luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
 
     for (i = 1; i <= n; i++) {
         lua_rawgeti(L, 1, i);
@@ -575,36 +525,28 @@ redis_build_query(lua_State *L)
         switch (lua_type(L, -1)) {
             case LUA_TSTRING:
             case LUA_TNUMBER:
-                p = luaL_checklstring(L, -1, &len);
-
-                *last++ = '$';
-
-                last = sprintf_num(last, len);
-
-                *last++ = '\r'; *last++ = '\n';
-
-                memcpy(last, p, len);
-                last += len;
-
-                *last++ = '\r'; *last++ = '\n';
-
+		luaL_checklstring(L, -1, &len);
+		luaL_putchar(&buf, '$');
+		lua_pushnumber(L, len);
+		luaL_addvalue(&buf);
+		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+		/*string is already at top of stack*/
+		luaL_addvalue(&buf);
+		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
+		
                 break;
 
             case LUA_TBOOLEAN:
-                memcpy(last, "$1\r\n", sizeof("$1\r\n") - 1);
-                last += sizeof("$1\r\n") - 1;
-
-                flag = lua_toboolean(L, -1);
-                *last++ = flag ? '1' : '0';
-
-                *last++ = '\r'; *last++ = '\n';
+		luaL_addlstring(&buf, "$1\r\n", sizeof("$1\r\n") - 1);
+		lua_pushnumber(L, lua_toboolean(L, -1));
+		luaL_addvalue(&buf);
+		luaL_addlstring(&buf, "\r\n", sizeof("\r\n") - 1);
 
                 break;
 
             case LUA_TLIGHTUSERDATA:
                 /* must be null */
-                memcpy(last, "$-1\r\n", sizeof("$-1\r\n") - 1);
-                last += sizeof("$-1\r\n") - 1;
+		luaL_addlstring(&buf, "$-1\r\n", sizeof("$-1\r\n") - 1);
                 break;
 
             default:
@@ -613,52 +555,10 @@ redis_build_query(lua_State *L)
         }
     }
 
-    if (last - buf != (ssize_t) total) {
-        return luaL_error(L, "buffer error");
-    }
-
-    lua_pushlstring(L, buf, total);
-
-    free(buf);
+    luaL_pushresult(&buf);
 
     return 1;
 }
-
-
-static size_t
-get_num_size(size_t i)
-{
-    size_t          n = 0;
-
-    do {
-        i = i / 10;
-        n++;
-    } while (i > 0);
-
-    return n;
-}
-
-
-static char *
-sprintf_num(char *dst, int64_t ui64)
-{
-    char             *p;
-    char              temp[UINT64_LEN + 1];
-    size_t            len;
-
-    p = temp + UINT64_LEN;
-
-    do {
-        *--p = (char) (ui64 % 10 + '0');
-    } while (ui64 /= 10);
-
-    len = (temp + UINT64_LEN) - p;
-
-    memcpy(dst, p, len);
-
-    return dst + len;
-}
-
 
 static int
 redis_typename(lua_State *L)
